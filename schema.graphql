@@ -1,0 +1,53 @@
+# GraphQL schema for all the data we collect from the Soccerverse
+# smart contracts (excluding Democrit which has its own subgraph).
+
+################################################################################
+# Referral leaderboard
+
+# A user that has referred others.
+type Referrer @entity (immutable: true) {
+  "The ID is the Xaya account name as Bytes."
+  id: Bytes!
+  account: String!
+  referrals: [Referral!]! @derivedFrom (field: "referrer")
+  bonuses: [ReferrerBonus!]! @derivedFrom (field: "referrer")
+  totals: [ReferrerTotal!]!  @derivedFrom (field: "referrer")
+}
+
+# Each user that a referrer has referred is tracked here.
+type Referral @entity (immutable: true) {
+  "The ID is the Xaya account name as Bytes."
+  id: Bytes!
+  referral: String!
+  referrer: Referrer!
+  timestamp: Timestamp!
+}
+
+# A referral bonus given.
+type ReferrerBonus @entity (immutable: true) {
+  "The ID is constructed from txid and log index and just a unique ID."
+  id: Bytes!
+  referrer: Referrer!
+  referral: Referral!
+  timestamp: Timestamp!
+  clubId: BigInt!
+  packsBought: Int!
+  usdSpent: Int!
+  bonusShares: BigInt!
+}
+
+# Running totals for referral stats.  Whenever they change (such as new referral
+# or referral overwritten, or bonus received), we add a new entry here with
+# updated totals.  From this, stats for some time range can be derived
+# by subtracting the totals.
+type ReferrerTotal @entity (immutable: true) {
+  "The ID is constructed from account name and a running counter for how many totals we already have for this account."
+  id: Bytes!
+  referrer: Referrer!
+  "How many preceding totals there already are for this referrer."
+  index: BigInt!
+  referrals: BigInt!
+  bonusShares: BigInt!
+  "Total USD spent by referrals."
+  usdSpent: BigInt!
+}

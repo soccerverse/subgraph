@@ -1,0 +1,48 @@
+specVersion: 0.0.8
+schema:
+  file: schema.graphql
+dataSources:
+  - kind: ethereum/contract
+    name: ReferralTracker
+    network: matic
+    source:
+      address: "0x329612BB11Eea1Ea5065993DC32b41C86D6068c2"
+      abi: ReferralTracker
+      startBlock: 62773319
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.7
+      language: wasm/assemblyscript
+      entities:
+        - Referrer
+        - Referral
+      abis:
+        - name: ReferralTracker
+          file: ./abis/ReferralTracker.json
+      blockHandlers:
+        - handler: createPackSaleTiers
+          filter:
+            kind: once
+      eventHandlers:
+        - event: ReferrerUpdated(string,string,uint256)
+          handler: handleReferrerUpdated
+      file: src/referralTracker.ts
+templates:
+  - kind: ethereum/contract
+    name: PackSaleTier
+    network: matic
+    source:
+      abi: SwappingPackSale
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.7
+      language: wasm/assemblyscript
+      entities:
+        - ReferrerBonus
+      abis:
+        - name: SwappingPackSale
+          file: abis/SwappingPackSale.json
+      eventHandlers:
+        - event: ReferralBonusGiven(string,string,uint256,uint256,uint256,uint256)
+          handler: handleReferralBonus
+      file: src/referralBonus.ts
