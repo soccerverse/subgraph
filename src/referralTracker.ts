@@ -31,7 +31,7 @@ import {
 /**
  * Converts a Xaya account name to an associated Bytes ID.
  */
-function accountToBytes (account: String): Bytes
+export function accountToBytes (account: String): Bytes
 {
   return Bytes.fromUTF8 (account)
 }
