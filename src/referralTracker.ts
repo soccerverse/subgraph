@@ -50,7 +50,7 @@ function updateReferrerTotals (
 
   const next = new ReferrerTotal (newId)
   next.referrer = prev.referrer
-  next.timestamp = timestamp.toI64 ()
+  next.timestamp = timestamp
   next.index = prev.index + BigInt.fromI32 (1)
   next.referrals = prev.referrals + BigInt.fromI64 (deltaReferrals)
   next.bonusShares = prev.bonusShares + BigInt.fromI64 (deltaBonusShares)
@@ -93,7 +93,7 @@ export function handleReferrerUpdated (event: ReferrerUpdatedEvent): void
       totals.referrals = BigInt.fromI32 (1)
       totals.bonusShares = BigInt.fromI32 (0)
       totals.usdSpent = BigInt.fromI32 (0)
-      totals.timestamp = event.block.timestamp.toI64 ()
+      totals.timestamp = event.block.timestamp
       totals.save ()
 
       const referrer = new Referrer (refId)
@@ -108,7 +108,7 @@ export function handleReferrerUpdated (event: ReferrerUpdatedEvent): void
   referral = new Referral (id)
   referral.account = event.params.name
   referral.referrer = refId
-  referral.timestamp = event.block.timestamp.toI64 ()
+  referral.timestamp = event.block.timestamp
   referral.save ()
 }
 
@@ -124,7 +124,7 @@ export function handleReferralBonus (event: ReferralBonusGivenEvent): void
   const bonus = new ReferrerBonus (id)
   bonus.referrer = referrer
   bonus.referral = accountToBytes (event.params.buyer)
-  bonus.timestamp = timestamp.toI64 ()
+  bonus.timestamp = timestamp
   bonus.clubId = event.params.clubId
   bonus.packsBought = event.params.numPacksBought
   bonus.usdSpent = BigInt.fromI64 (usdSpent)
