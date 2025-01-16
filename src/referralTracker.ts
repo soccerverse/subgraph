@@ -3,12 +3,22 @@ import {
 } from "../generated/ReferralTracker/ReferralTracker"
 
 import {
+  ReferralBonusGiven as ReferralBonusGivenEvent,
+} from "../generated/templates/PackSaleTier/SwappingPackSale"
+
+import {
   Referral,
   Referrer,
+  ReferrerBonus,
   ReferrerTotal,
 } from "../generated/schema"
 
 import {
+  PackSaleTier,
+} from "../generated/templates"
+
+import {
+  Address,
   BigInt,
   ByteArray,
   Bytes,
@@ -37,15 +47,14 @@ function updateReferrerTotals (
   const ref = Referrer.load (refId)!
   const prev = ReferrerTotal.load (ref.currentTotal)!
   const newId = ref.id.concatI32 (prev.index.toI32 () + 1)
-  const next = new ReferrerTotal (newId)
 
+  const next = new ReferrerTotal (newId)
   next.referrer = prev.referrer
   next.timestamp = timestamp.toI64 ()
   next.index = prev.index + BigInt.fromI32 (1)
   next.referrals = prev.referrals + BigInt.fromI64 (deltaReferrals)
   next.bonusShares = prev.bonusShares + BigInt.fromI64 (deltaBonusShares)
   next.usdSpent = prev.usdSpent + BigInt.fromI64 (deltaUsdSpent)
-
   next.save ()
 
   ref.currentTotal = newId
@@ -103,10 +112,41 @@ export function handleReferrerUpdated (event: ReferrerUpdatedEvent): void
   referral.save ()
 }
 
+export function handleReferralBonus (event: ReferralBonusGivenEvent): void
+{
+  const id = event.transaction.hash.concatI32 (event.logIndex.toI32 ())
+
+  const referrer = accountToBytes (event.params.referrer)
+  const timestamp = event.block.timestamp
+  const usdSpent = event.params.cost.toI64 ()
+  const bonusShares = event.params.numShares.toI64 ()
+
+  const bonus = new ReferrerBonus (id)
+  bonus.referrer = referrer
+  bonus.referral = accountToBytes (event.params.buyer)
+  bonus.timestamp = timestamp.toI64 ()
+  bonus.clubId = event.params.clubId
+  bonus.packsBought = event.params.numPacksBought
+  bonus.usdSpent = BigInt.fromI64 (usdSpent)
+  bonus.bonusShares = BigInt.fromI64 (bonusShares)
+  bonus.save ()
+
+  updateReferrerTotals (referrer, timestamp, 0, bonusShares, usdSpent)
+}
+
 /* ************************************************************************** */
 
 export function createPackSaleTiers (block: ethereum.Block): void
 {
-  /* TODO: Instantiate the pack-sale tier template for each of the
-     contracts we have, so we can listen to their events.  */
+  const addresses = [
+    "0x8501A9018A5625b720355A5A05c5dA3D5E8bB003",
+    "0x0bF818f3A69485c8B05Cf6292D9A04C6f58ADF08",
+    "0x4259D89087b6EBBC8bE38A30393a2F99F798FE2f",
+    "0x167360A54746b82e38f700dF0ef812c269c4e565",
+    "0x3d25Cb3139811c6AeE9D5ae8a01B2e5824b5dB91",
+  ];
+
+  addresses.forEach ((addr) => {
+    PackSaleTier.create (Address.fromString (addr));
+  });
 }

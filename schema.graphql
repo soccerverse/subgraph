@@ -33,8 +33,8 @@ type ReferrerBonus @entity (immutable: true) {
   referral: Referral!
   timestamp: Timestamp!
   clubId: BigInt!
-  packsBought: Int!
-  usdSpent: Int!
+  packsBought: BigInt!
+  usdSpent: BigInt!
   bonusShares: BigInt!
 }
 

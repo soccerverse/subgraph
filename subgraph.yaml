@@ -45,4 +45,4 @@ templates:
       eventHandlers:
         - event: ReferralBonusGiven(string,string,uint256,uint256,uint256,uint256)
           handler: handleReferralBonus
-      file: src/referralBonus.ts
+      file: src/referralTracker.ts
