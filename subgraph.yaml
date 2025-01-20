@@ -29,7 +29,7 @@ dataSources:
       file: src/referralTracker.ts
 templates:
   - kind: ethereum/contract
-    name: PackSaleTier
+    name: PackSaleForReferrals
     network: matic
     source:
       abi: SwappingPackSale

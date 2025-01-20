@@ -4,7 +4,7 @@ import {
 
 import {
   ReferralBonusGiven as ReferralBonusGivenEvent,
-} from "../generated/templates/PackSaleTier/SwappingPackSale"
+} from "../generated/templates/PackSaleForReferrals/SwappingPackSale"
 
 import {
   Referral,
@@ -14,7 +14,7 @@ import {
 } from "../generated/schema"
 
 import {
-  PackSaleTier,
+  PackSaleForReferrals,
 } from "../generated/templates"
 
 import {
@@ -147,6 +147,6 @@ export function createPackSaleTiers (block: ethereum.Block): void
   ];
 
   addresses.forEach ((addr) => {
-    PackSaleTier.create (Address.fromString (addr));
+    PackSaleForReferrals.create (Address.fromString (addr));
   });
 }

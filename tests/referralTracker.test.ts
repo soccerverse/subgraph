@@ -18,7 +18,7 @@ import {
 
 import {
   ReferralBonusGiven as ReferralBonusGivenEvent,
-} from "../generated/templates/PackSaleTier/SwappingPackSale"
+} from "../generated/templates/PackSaleForReferrals/SwappingPackSale"
 
 import {
   Referral,
