@@ -54,3 +54,47 @@ type ReferrerTotal @entity (immutable: true) {
   "Total USD spent by referrals."
   usdSpent: BigInt!
 }
+
+################################################################################
+# Shop and pack-sale stuff
+
+# A tier (individual sales contract) in the pack sale.
+type SaleTier @entity {
+  "The ID is the contract address (as Bytes)."
+  id: Bytes!
+  name: String!
+  "True if the sale is active, i.e. not paused."
+  active: Boolean!
+  clubs: [SaleClub!]! @derivedFrom (field: "tier")
+  pausedClubs: [SaleClub!]! @derivedFrom (field: "pausedInTier")
+  pricingSteps: [PricingStep!]! @derivedFrom (field: "tier")
+}
+
+# A pricing step for a sale tier.
+type PricingStep @entity (immutable: true) {
+  "The ID is the tier ID / address and the step index added."
+  id: Bytes!
+  tier: SaleTier!
+  index: Int!
+  "Number of shares available at this price."
+  numShares: Int!
+  "Price of one share in this batch."
+  price: BigInt!
+  "Minimum number of shares minted before this is in effect."
+  fromTotal: Int!
+  "Maximum number of shares minted when this is still in effect."
+  toTotal: Int!
+}
+
+# A club in the sale.
+type SaleClub @entity {
+  "The ID is the club ID as integer converted to bytes."
+  id: Bytes!
+  clubId: Int!
+  "The SaleTier this is part of, if the club is actively sold."
+  tier: SaleTier
+  "The SaleTier this is part of as a paused club."
+  pausedInTier: SaleTier
+  "Total number of shares minted in the club so far."
+  minted: Int!
+}

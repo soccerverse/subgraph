@@ -14,8 +14,9 @@ dataSources:
       apiVersion: 0.0.7
       language: wasm/assemblyscript
       entities:
-        - Referrer
         - Referral
+        - Referrer
+        - ReferrerTotal
       abis:
         - name: ReferralTracker
           file: ./abis/ReferralTracker.json
@@ -27,6 +28,32 @@ dataSources:
         - event: ReferrerUpdated(string,string,uint256)
           handler: handleReferrerUpdated
       file: src/referralTracker.ts
+  - kind: ethereum/contract
+    name: ClubMinter
+    network: matic
+    source:
+      address: "0xeEE0d855112b71Dc68d72053594Af03F92C586Ae"
+      abi: ClubMinter
+      startBlock: 66056325
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.7
+      language: wasm/assemblyscript
+      entities:
+        - SaleClub
+      abis:
+        - name: ClubMinter
+          file: ./abis/ClubMinter.json
+        - name: SwappingPackSale
+          file: abis/SwappingPackSale.json
+      blockHandlers:
+        - handler: createPackSaleTiers
+          filter:
+            kind: once
+      eventHandlers:
+        - event: SharesMinted(indexed uint256,uint256,string,uint256,uint256)
+          handler: handleSharesMinted
+      file: src/saleTiers.ts
 templates:
   - kind: ethereum/contract
     name: PackSaleForReferrals
@@ -39,6 +66,7 @@ templates:
       language: wasm/assemblyscript
       entities:
         - ReferrerBonus
+        - ReferrerTotal
       abis:
         - name: SwappingPackSale
           file: abis/SwappingPackSale.json
@@ -46,3 +74,35 @@ templates:
         - event: ReferralBonusGiven(string,string,uint256,uint256,uint256,uint256)
           handler: handleReferralBonus
       file: src/referralTracker.ts
+  - kind: ethereum/contract
+    name: PackSaleForShop
+    network: matic
+    source:
+      abi: SwappingPackSale
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.7
+      language: wasm/assemblyscript
+      entities:
+        - PriceStep
+        - SaleClub
+        - SaleTier
+      abis:
+        - name: SwappingPackSale
+          file: abis/SwappingPackSale.json
+      eventHandlers:
+        - event: ClubAdded(indexed uint256)
+          handler: handleClubAdded
+        - event: ClubRemoved(indexed uint256)
+          handler: handleClubRemoved
+        - event: ClubSalePaused(indexed uint256)
+          handler: handleClubSalePaused
+        - event: Paused(address)
+          handler: handleSalePaused
+        - event: Unpaused(address)
+          handler: handleSaleUnpaused
+        - event: PricingUpdated((uint256,uint256)[])
+          handler: handlePricingUpdated
+        - event: SeedUpdated(bytes32)
+          handler: handleSeedUpdated
+      file: src/saleTiers.ts
