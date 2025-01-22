@@ -6,19 +6,19 @@
 
 # A user that has referred others.
 type Referrer @entity {
-  "The ID is the Xaya account name as Bytes."
+  # The ID is the Xaya account name as Bytes.
   id: Bytes!
   account: String!
   referrals: [Referral!]! @derivedFrom (field: "referrer")
   bonuses: [ReferrerBonus!]! @derivedFrom (field: "referrer")
   totals: [ReferrerTotal!]!  @derivedFrom (field: "referrer")
-  "The current (last) ReferrerTotal for this referrer."
+  # The current (last) ReferrerTotal for this referrer.
   currentTotal: ReferrerTotal!
 }
 
 # Each user that a referrer has referred is tracked here.
 type Referral @entity (immutable: true) {
-  "The ID is the Xaya account name as Bytes."
+  # The ID is the Xaya account name as Bytes.
   id: Bytes!
   account: String!
   referrer: Referrer!
@@ -27,7 +27,7 @@ type Referral @entity (immutable: true) {
 
 # A referral bonus given.
 type ReferrerBonus @entity (immutable: true) {
-  "The ID is constructed from txid and log index and just a unique ID."
+  # The ID is constructed from txid and log index and just a unique ID.
   id: Bytes!
   referrer: Referrer!
   referral: Referral!
@@ -43,15 +43,16 @@ type ReferrerBonus @entity (immutable: true) {
 # updated totals.  From this, stats for some time range can be derived
 # by subtracting the totals.
 type ReferrerTotal @entity (immutable: true) {
-  "The ID is constructed from account name and a running counter for how many totals we already have for this account."
+  # The ID is constructed from account name and a running counter for how many
+  # totals we already have for this account.
   id: Bytes!
   referrer: Referrer!
   timestamp: BigInt!
-  "How many preceding totals there already are for this referrer."
+  # How many preceding totals there already are for this referrer.
   index: BigInt!
   referrals: BigInt!
   bonusShares: BigInt!
-  "Total USD spent by referrals."
+  # Total USD spent by referrals.
   usdSpent: BigInt!
 }
 
@@ -60,10 +61,10 @@ type ReferrerTotal @entity (immutable: true) {
 
 # A tier (individual sales contract) in the pack sale.
 type SaleTier @entity {
-  "The ID is the contract address (as Bytes)."
+  # The ID is the contract address (as Bytes).
   id: Bytes!
   name: String!
-  "True if the sale is active, i.e. not paused."
+  # True if the sale is active, i.e. not paused.
   active: Boolean!
   clubs: [SaleClub!]! @derivedFrom (field: "tier")
   pausedClubs: [SaleClub!]! @derivedFrom (field: "pausedInTier")
@@ -72,29 +73,29 @@ type SaleTier @entity {
 
 # A pricing step for a sale tier.
 type PricingStep @entity (immutable: true) {
-  "The ID is the tier ID / address and the step index added."
+  # The ID is the tier ID / address and the step index added.
   id: Bytes!
   tier: SaleTier!
   index: Int!
-  "Number of shares available at this price."
+  # Number of shares available at this price.
   numShares: Int!
-  "Price of one share in this batch."
+  # Price of one share in this batch.
   price: BigInt!
-  "Minimum number of shares minted before this is in effect."
+  # Minimum number of shares minted before this is in effect.
   fromTotal: Int!
-  "Maximum number of shares minted when this is still in effect."
+  # Maximum number of shares minted when this is still in effect.
   toTotal: Int!
 }
 
 # A club in the sale.
 type SaleClub @entity {
-  "The ID is the club ID as integer converted to bytes."
+  # The ID is the club ID as integer converted to bytes.
   id: Bytes!
   clubId: Int!
-  "The SaleTier this is part of, if the club is actively sold."
+  # The SaleTier this is part of, if the club is actively sold.
   tier: SaleTier
-  "The SaleTier this is part of as a paused club."
+  # The SaleTier this is part of as a paused club.
   pausedInTier: SaleTier
-  "Total number of shares minted in the club so far."
+  # Total number of shares minted in the club so far.
   minted: Int!
 }
