@@ -8,15 +8,19 @@ import {
   ClubSalePaused as ClubSalePausedEvent,
   Paused as PausedEvent,
   Unpaused as UnpausedEvent,
+  PacksBought as PacksBoughtEvent,
   PricingUpdated as PricingUpdatedEvent,
   SeedUpdated as SeedUpdatedEvent,
   SwappingPackSale,
 } from "../generated/templates/PackSaleForShop/SwappingPackSale"
 
 import {
+  Pack,
+  PackShareContent,
+  PacksBought,
+  PricingStep,
   SaleClub,
   SaleTier,
-  PricingStep,
 } from "../generated/schema"
 
 import {
@@ -24,13 +28,17 @@ import {
 } from "../generated/templates"
 
 import {
+  PACK_START_HEIGHT,
   SALE_CONTRACTS,
 } from "./config"
 
 import {
   Address,
+  BigInt,
   Bytes,
+  ValueKind,
   ethereum,
+  log,
   store,
 } from "@graphprotocol/graph-ts"
 
@@ -42,6 +50,87 @@ import {
 function clubEntityId (clubId: i32): Bytes
 {
   return Bytes.fromI32 (clubId)
+}
+
+/**
+ * Removes all data stored about a given pack primary club.
+ */
+function removeClubsPack (clubId: i32): void
+{
+  const entityId = clubEntityId (clubId)
+  const club = SaleClub.load (entityId)
+  if (club == null)
+    return
+
+  const pack = Pack.load (entityId)
+  if (pack == null)
+    return
+
+  const shares = pack.shares.load ()
+  for (let i = 0; i < shares.length; ++i)
+    store.remove ("PackShareContent", shares[i].id.toHexString ())
+  store.remove ("Pack", entityId.toHexString ())
+}
+
+/**
+ * Refreshes the pack data for the given primary club.
+ */
+function refreshClubsPack (clubId: i32): void
+{
+  removeClubsPack (clubId)
+
+  const entityId = clubEntityId (clubId)
+  const club = SaleClub.load (entityId)
+  if (club == null)
+    return
+
+  /* This essentially checks if club.tier is null, and if so, returns, otherwise
+     continues with the bytes value.  But directly doing that causes an
+     internal compiler error with AssemblyScript.  */
+  const tierValue = club.get ("tier")
+  if (!tierValue || tierValue.kind == ValueKind.NULL)
+    return
+  const tier = tierValue.toBytes ()
+
+  const contract = SwappingPackSale.bind (Address.fromBytes (tier))
+  const maxPacks = contract.getMaxPacks (BigInt.fromI32 (clubId)).toI32 ()
+  if (maxPacks <= 0)
+    return
+
+  const prev = contract.preview (BigInt.fromI32 (clubId), BigInt.fromI32 (1))
+
+  const pack = new Pack (entityId)
+  pack.primaryClub = entityId
+  pack.maxPacks = maxPacks
+  pack.cost = prev.cost
+  pack.save ()
+
+  for (let i = 0; i < prev.shares.length; ++i)
+    {
+      const thisClubId = clubEntityId (prev.shares[i].clubId.toI32 ())
+      const sh = new PackShareContent (entityId.concat (thisClubId))
+      sh.pack = entityId
+      sh.club = thisClubId
+      sh.num = prev.shares[i].numShares.toI32 ()
+      sh.save ()
+    }
+}
+
+/**
+ * Refreshes the pack data for all clubs in a tier.
+ */
+function refreshTierPacks (addr: Address): void
+{
+  const tier = SaleTier.load (addr)!
+  const clubs = tier.clubs.load ()
+
+  /* We use warning level here since info is spammed with the batch writes
+     that are done per block, so those would just drown in there.  They are not
+     really "something going wrong", though.  */
+  log.warning ("Starting full refresh of packs in tier: {}", [tier.name])
+  for (let i = 0; i < clubs.length; ++i)
+    refreshClubsPack (clubs[i].clubId)
+  log.warning ("Finished pack refresh for tier: {}", [tier.name])
 }
 
 /* ************************************************************************** */
@@ -57,6 +146,15 @@ export function handleSharesMinted (event: SharesMintedEvent): void
     }
   club.minted = event.params.totalMinted.toI32 ()
   club.save ()
+
+  /* All packs that contain the club need to be updated.  */
+  const packs = club.containedInPacks.load ()
+  for (let i = 0; i < packs.length; ++i)
+    {
+      const pack = Pack.load (packs[i].pack)!
+      const primaryClub = SaleClub.load (pack.primaryClub)!
+      refreshClubsPack (primaryClub.clubId)
+    }
 }
 
 export function handleClubAdded (event: ClubAddedEvent): void
@@ -72,10 +170,15 @@ export function handleClubAdded (event: ClubAddedEvent): void
   club.tier = event.address
   club.pausedInTier = null
   club.save ()
+
+  if (event.block.number.toI32 () >= PACK_START_HEIGHT)
+    refreshTierPacks (event.address)
 }
 
 export function handleClubRemoved (event: ClubRemovedEvent): void
 {
+  removeClubsPack (event.params.clubId.toI32 ())
+
   const club = SaleClub.load (clubEntityId (event.params.clubId.toI32 ()))!
   club.tier = null
   /* In the contract, ClubSalePaused is emitted after ClubRemoved.  So if the
@@ -84,6 +187,9 @@ export function handleClubRemoved (event: ClubRemovedEvent): void
      entirely.  */
   club.pausedInTier = null
   club.save ()
+
+  if (event.block.number.toI32 () >= PACK_START_HEIGHT)
+    refreshTierPacks (event.address)
 }
 
 export function handleClubSalePaused (event: ClubSalePausedEvent): void
@@ -142,6 +248,9 @@ export function handlePricingUpdated (event: PricingUpdatedEvent): void
 
       step.save ()
     }
+
+  if (event.block.number.toI32 () >= PACK_START_HEIGHT)
+    refreshTierPacks (event.address)
 }
 
 export function handleSeedUpdated (event: SeedUpdatedEvent): void
@@ -151,15 +260,32 @@ export function handleSeedUpdated (event: SeedUpdatedEvent): void
      the contract has been deployed (not in the "once" handler).  Upon
      contract deployment, a first SeedUpdated event is emitted.  */
 
-    let tier = SaleTier.load (event.address)
-    if (tier == null)
-      {
-        const contract = SwappingPackSale.bind (event.address)
-        tier = new SaleTier (event.address)
-        tier.name = contract.tier ()
-        tier.active = !contract.paused ()
-        tier.save ()
-      }
+  let tier = SaleTier.load (event.address)
+  if (tier == null)
+    {
+      const contract = SwappingPackSale.bind (event.address)
+      tier = new SaleTier (event.address)
+      tier.name = contract.tier ()
+      tier.active = !contract.paused ()
+      tier.save ()
+    }
+
+  if (event.block.number.toI32 () >= PACK_START_HEIGHT)
+    refreshTierPacks (event.address)
+}
+
+export function handlePacksBought (event: PacksBoughtEvent): void
+{
+  const id = event.transaction.hash.concatI32 (event.logIndex.toI32 ())
+  const ev = new PacksBought (id)
+  ev.timestamp = event.block.timestamp
+  ev.buyer = event.params.buyer
+  ev.receiver = event.params.receiver
+  ev.primaryClub = clubEntityId (event.params.primaryClubId.toI32 ())
+  ev.tier = event.address
+  ev.numPacks = event.params.numPacks.toI32 ()
+  ev.usdSpent = event.params.cost
+  ev.save ()
 }
 
 /* ************************************************************************** */
