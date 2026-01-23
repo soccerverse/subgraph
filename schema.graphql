@@ -5,7 +5,7 @@
 # Referral leaderboard
 
 # A user that has referred others.
-type Referrer @entity {
+type Referrer @entity (immutable: false) {
   # The ID is the Xaya account name as Bytes.
   id: Bytes!
   account: String!
@@ -17,7 +17,7 @@ type Referrer @entity {
 }
 
 # Each user that a referrer has referred is tracked here.
-type Referral @entity {
+type Referral @entity (immutable: false) {
   # The ID is the Xaya account name as Bytes.
   id: Bytes!
   account: String!
@@ -60,7 +60,7 @@ type ReferrerTotal @entity (immutable: true) {
 # Shop and pack-sale stuff
 
 # A tier (individual sales contract) in the pack sale.
-type SaleTier @entity {
+type SaleTier @entity (immutable: false) {
   # The ID is the contract address (as Bytes).
   id: Bytes!
   name: String!
@@ -73,7 +73,7 @@ type SaleTier @entity {
 }
 
 # A pricing step for a sale tier.
-type PricingStep @entity {
+type PricingStep @entity (immutable: false) {
   # The ID is the tier ID / address and the step index added.
   id: Bytes!
   tier: SaleTier!
@@ -89,7 +89,7 @@ type PricingStep @entity {
 }
 
 # A club in the sale.
-type SaleClub @entity {
+type SaleClub @entity (immutable: false) {
   # The ID is the club ID as integer converted to bytes.
   id: Bytes!
   clubId: Int!
@@ -105,7 +105,7 @@ type SaleClub @entity {
 }
 
 # A pack that can be bought in the shop.
-type Pack @entity {
+type Pack @entity (immutable: false) {
   # The ID is the primary club ID as integer converted to bytes.
   id: Bytes!
   primaryClub: SaleClub!
@@ -118,7 +118,7 @@ type Pack @entity {
 }
 
 # Mapping table for all club shares included in packs.
-type PackShareContent @entity {
+type PackShareContent @entity (immutable: false) {
   # The ID is the pack ID concat the club ID.
   id: Bytes!
   pack: Pack!
