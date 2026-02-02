@@ -11,4 +11,4 @@ export const SALE_CONTRACTS = [
  * the last height at which a full refresh is done anyway (such as seed update)
  * to avoid recomputing it needlessly.
  */
-export const PACK_START_HEIGHT = 66977005
+export const PACK_START_HEIGHT = 80000000
