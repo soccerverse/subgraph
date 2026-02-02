@@ -117,6 +117,53 @@ function refreshClubsPack (clubId: i32): void
 }
 
 /**
+ * Refreshes a club's tranche / remainingInTranche data.
+ */
+function refreshClubTranche (clubId: i32): void
+{
+  const club = SaleClub.load (clubEntityId (clubId))
+  if (club == null)
+    return
+
+  /* Same as in refreshClubsPack, we need to access the tier in this way
+     to avoid an internal compiler error.  */
+  const tierValue = club.get ("tier")
+  if (!tierValue || tierValue.kind == ValueKind.NULL)
+    {
+      club.trancheIndex = -1
+      club.remainingInTranche = 0
+      club.save ()
+      return
+    }
+  const tier = SaleTier.load (tierValue.toBytes ())
+  if (tier == null)
+    {
+      club.trancheIndex = -1
+      club.remainingInTranche = 0
+      club.save ()
+      return
+    }
+  const pricing = tier.pricingSteps.load ()
+
+  /* Go through the pricing steps to find which one we are currently in.  Note
+     that toTotal is the value at which the tranche is still in effect,
+     one less than the total at which the next tranche applies.  */
+  for (let i = 0; i < pricing.length; ++i)
+    if (club.minted <= pricing[i].toTotal)
+      {
+        club.trancheIndex = i
+        club.remainingInTranche = pricing[i].toTotal + 1 - club.minted
+        club.save ()
+        return
+      }
+
+  /* We didn't find any matching tranche.  */
+  club.trancheIndex = -1
+  club.remainingInTranche = 0
+  club.save ()
+}
+
+/**
  * Refreshes the pack data for all clubs in a tier.
  */
 function refreshTierPacks (addr: Address): void
@@ -129,7 +176,10 @@ function refreshTierPacks (addr: Address): void
      really "something going wrong", though.  */
   log.warning ("Starting full refresh of packs in tier: {}", [tier.name])
   for (let i = 0; i < clubs.length; ++i)
-    refreshClubsPack (clubs[i].clubId)
+    {
+      refreshClubsPack (clubs[i].clubId)
+      refreshClubTranche (clubs[i].clubId)
+    }
   log.warning ("Finished pack refresh for tier: {}", [tier.name])
 }
 
@@ -146,6 +196,9 @@ export function handleSharesMinted (event: SharesMintedEvent): void
     }
   club.minted = event.params.totalMinted.toI32 ()
   club.save ()
+
+  /* Update the tranche information.  */
+  refreshClubTranche (event.params.clubId.toI32 ())
 
   /* All packs that contain the club need to be updated.  */
   const packs = club.containedInPacks.load ()
@@ -166,6 +219,8 @@ export function handleClubAdded (event: ClubAddedEvent): void
       club = new SaleClub (id)
       club.clubId = event.params.clubId.toI32 ()
       club.minted = 0
+      club.trancheIndex = -1
+      club.remainingInTranche = 0
     }
   club.tier = event.address
   club.pausedInTier = null

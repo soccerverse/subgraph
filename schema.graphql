@@ -99,6 +99,11 @@ type SaleClub @entity (immutable: false) {
   pausedInTier: SaleTier
   # Total number of shares minted in the club so far.
   minted: Int!
+  # The current tranche for the sale (or -1 if not for sale).
+  trancheIndex: Int!
+  # Number of influence remaining at the current tranche.  Zero if
+  # there is none for sale.
+  remainingInTranche: Int!
   primaryPack: Pack @derivedFrom (field: "primaryClub")
   containedInPacks: [PackShareContent!]! @derivedFrom (field: "club")
   packsBought: [PacksBought!]! @derivedFrom (field: "primaryClub")
