@@ -11,7 +11,7 @@ dataSources:
       startBlock: 62773319
     mapping:
       kind: ethereum/events
-      apiVersion: 0.0.7
+      apiVersion: 0.0.9
       language: wasm/assemblyscript
       entities:
         - Referral
@@ -37,7 +37,7 @@ dataSources:
       startBlock: 66056325
     mapping:
       kind: ethereum/events
-      apiVersion: 0.0.7
+      apiVersion: 0.0.9
       language: wasm/assemblyscript
       entities:
         - SaleClub
@@ -62,7 +62,7 @@ templates:
       abi: SwappingPackSale
     mapping:
       kind: ethereum/events
-      apiVersion: 0.0.7
+      apiVersion: 0.0.9
       language: wasm/assemblyscript
       entities:
         - ReferrerBonus
@@ -81,7 +81,7 @@ templates:
       abi: SwappingPackSale
     mapping:
       kind: ethereum/events
-      apiVersion: 0.0.7
+      apiVersion: 0.0.9
       language: wasm/assemblyscript
       entities:
         - PacksBought
