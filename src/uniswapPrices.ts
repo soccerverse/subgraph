@@ -113,6 +113,33 @@ export function observationId (tradedToken: Address, baseToken: Address,
 }
 
 /**
+ * Calculates the 24h average price (if available) and adds it to
+ * the existing PriceObservation entity.
+ */
+function addAveragePrice (tradedToken: Address, baseToken: Address,
+                          virtualTime: i64): void
+{
+  const obsId = observationId (tradedToken, baseToken, virtualTime)
+  const obs = PriceObservation.load (obsId)
+  if (obs == null)
+    return
+
+  const prevVirtualTime = virtualTime - 3600 * 24
+  const prevObsId = observationId (tradedToken, baseToken, prevVirtualTime)
+  const prevObs = PriceObservation.load (prevObsId)
+  if (prevObs == null)
+    return
+
+  if (prevObs.exactTimestamp >= obs.exactTimestamp)
+    log.critical ("Previous observation timestamp is too late", [])
+  let average24h = obs.cumulativePrice - prevObs.cumulativePrice
+  average24h /= obs.exactTimestamp - prevObs.exactTimestamp
+
+  obs.average24h = average24h
+  obs.save ()
+}
+
+/**
  * Reads and records in store a price observation for the given token pair
  * at the current time.
  */
@@ -164,8 +191,6 @@ export function observeTokenPair (tradedToken: Address, baseToken: Address,
   priceWithDecimals /= decBase
   priceWithDecimals = priceWithDecimals.rightShift (112)
 
-  /* TODO: average24h calculation */
-
   const obsId = observationId (tradedToken, baseToken, virtualTime)
   const obs = new PriceObservation (obsId)
   obs.pair = pairId
@@ -173,6 +198,8 @@ export function observeTokenPair (tradedToken: Address, baseToken: Address,
   obs.exactTimestamp = BigInt.fromI64 (realTime)
   obs.cumulativePrice = priceWithDecimals
   obs.save ()
+
+  addAveragePrice (tradedToken, baseToken, virtualTime)
 }
 
 /* ************************************************************************** */

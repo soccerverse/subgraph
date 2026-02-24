@@ -171,4 +171,36 @@ describe ("UniswapPrices", () => {
                             cumPrice, BigInt.zero ())
   })
 
+  test ("24h average", () => {
+    const WCHIa = Address.fromString (WCHI)
+    const WETHa = Address.fromString (WETH)
+
+    const wchiDec = BigInt.fromI32 (10).pow (8)
+    const wethDec = BigInt.fromI32 (10).pow (18)
+
+    mockTokenPair (WCHIa, WETHa, BigInt.zero (),
+                   wchiDec * BigInt.fromI32 (250),
+                   wethDec * BigInt.fromI32 (1000),
+                   0)
+    observeTokenPair (WCHIa, WETHa, 0, 1)
+
+    mockTokenPair (WCHIa, WETHa, BigInt.zero (),
+                   wchiDec * BigInt.fromI32 (500),
+                   wethDec * BigInt.fromI32 (250),
+                   OBSERVATION_PERIOD)
+    observeTokenPair (WCHIa, WETHa, OBSERVATION_PERIOD, OBSERVATION_PERIOD + 3)
+
+    const DAY = 3600 * 24
+    mockTokenPair (WCHIa, WETHa, BigInt.zero (),
+                   wchiDec * BigInt.fromI32 (250),
+                   wethDec * BigInt.fromI32 (1000),
+                   0)
+    observeTokenPair (WCHIa, WETHa, DAY, DAY + 5)
+
+    const cumPrice
+        = BigInt.fromI32 (DAY + 5) * BigInt.fromI32 (4).leftShift (112)
+    assertPriceObservation (WCHIa, WETHa, DAY, DAY + 5,
+                            cumPrice, BigInt.fromI32 (4).leftShift (112))
+  })
+
 })
