@@ -193,6 +193,10 @@ export function handleSharesMinted (event: SharesMintedEvent): void
     {
       club = new SaleClub (id)
       club.clubId = event.params.clubId.toI32 ()
+      /* For now, fill in dummy values for the required tranche
+         fields.  They will be updated below.  */
+      club.trancheIndex = -1
+      club.remainingInTranche = 0
     }
   club.minted = event.params.totalMinted.toI32 ()
   club.save ()
