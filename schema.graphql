@@ -147,3 +147,64 @@ type PacksBought @entity (immutable: true) {
   numPacks: Int!
   usdSpent: BigInt!
 }
+
+################################################################################
+# Price data for WCHI from Uniswap
+
+# Data about a token that we track prices for.
+type Token @entity (immutable: true) {
+  # The ID is the contract address.
+  id: Bytes!
+  # Number of decimals.
+  decimals: Int!
+  # The token symbol / tracker.
+  symbol: String!
+}
+
+# A pair of tokens that we track prices for.
+type TokenPair @entity (immutable: true) {
+  # The ID is constructed by concat of tradedToken and baseToken.
+  id: Bytes!
+  # The token being traded (such as WCHI for the WCHI/WETH pair).
+  tradedToken: Token!
+  # The base token in which prices are denominated (such as WETH for WCHI/WETH).
+  baseToken: Token!
+  # The address of the Uniswap pair contract.
+  uniswapPair: Bytes!
+  # Price observations for this token pair.
+  prices: [PriceObservation!]! @derivedFrom (field: "pair")
+}
+
+# Average, periodic pricing data from Uniswap v2 for token pairs.  These
+# observations are recorded at fixed intervals, at virtual timestamps that
+# represent these intervals exactly (such as UNIX timestamps for every whole
+# hour or daily UTC midnights).
+type PriceObservation @entity (immutable: true) {
+  # The ID is constructed by concat of the token pair ID and the virtual
+  # timestamp as Bytes.fromI64.
+  id: Bytes!
+  # The token pair this is for.
+  pair: TokenPair!
+
+  # The virtual timestamp this observation is for.
+  virtualTimestamp: BigInt!
+
+  # The exact timestamp this observation is for.  This might be slightly
+  # larger than the virtual timestamp, since the actual logic to take
+  # observations runs at certain block intervals, and uses the first block
+  # it runs on after a desired exact observation timestamp to get the values.
+  exactTimestamp: BigInt!
+
+  # The prices are encoded as fixed-point numbers with denominator 2**112,
+  # like Uniswap's UQ112x112 format.  Unlike Uniswap, they take token decimals
+  # into account already, so the real number represented by the fixed-point
+  # value is the actual, human-readable token price in real token units
+  # (not the underlying integer base units).
+
+  # The cumulative price from the Uniswap pair as per the timestamp, encoded
+  # as fixed-point number.
+  cumulativePrice: BigInt!
+  # The moving average 24 hour price of the token as per the observation time.
+  # This will not be set for the initial 24 hours of observations.
+  average24h: BigInt
+}
