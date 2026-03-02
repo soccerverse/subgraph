@@ -181,7 +181,7 @@ type TokenPair @entity (immutable: true) {
 # hour or daily UTC midnights).
 type PriceObservation @entity (immutable: true) {
   # The ID is constructed by concat of the token pair ID and the virtual
-  # timestamp as Bytes.fromI64.
+  # timestamp as 64-bit big-endian integer (so IDs sort chronologically).
   id: Bytes!
   # The token pair this is for.
   pair: TokenPair!
