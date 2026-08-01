@@ -16,7 +16,8 @@ import {
 
 import {
   PacksBought as VoucherPacksBoughtEvent,
-} from "../generated/PackVoucher/SwappingPackSale"
+  Transfer as VoucherTransferEvent,
+} from "../generated/PackVoucher/PackVoucher"
 
 import {
   InfluenceMint,
@@ -26,6 +27,7 @@ import {
   PricingStep,
   SaleClub,
   SaleTier,
+  TxMints,
 } from "../generated/schema"
 
 import {
@@ -248,6 +250,23 @@ function pricingTier (club: SaleClub): SaleTier | null
 }
 
 /**
+ * Loads or creates the per-transaction bookkeeping row.  Its mints are a
+ * derived lookup, so there is nothing to maintain beyond its existence and
+ * the voucher-burn counter.
+ */
+function txMintsRow (txHash: Bytes): TxMints
+{
+  let row = TxMints.load (txHash)
+  if (row == null)
+    {
+      row = new TxMints (txHash)
+      row.voucherBurns = 0
+      row.save ()
+    }
+  return row
+}
+
+/**
  * Records one influence mint, priced at the tranches it consumed.  We do this
  * for every mint and not just the paid ones, because the unpaid mints (the
  * premine, admin allocations, referral bonuses) move the sale's tranche
@@ -257,12 +276,16 @@ function pricingTier (club: SaleClub): SaleTier | null
 function recordInfluenceMint (event: SharesMintedEvent, club: SaleClub): void
 {
   const num = event.params.num.toI32 ()
+  const queue = txMintsRow (event.transaction.hash)
 
   const mint = new InfluenceMint (
       event.transaction.hash.concatI32 (event.logIndex.toI32 ()))
   mint.timestamp = event.block.timestamp
   mint.height = event.block.number
   mint.txHash = event.transaction.hash
+  mint.tx = queue.id
+  mint.voucherInvocation = queue.voucherBurns
+  mint.referralBonus = false
   mint.club = club.id
   mint.receiver = event.params.receiver
   mint.num = num
@@ -286,6 +309,63 @@ function recordInfluenceMint (event: SharesMintedEvent, club: SaleClub): void
     }
 
   mint.save ()
+}
+
+/**
+ * Marks the referral-bonus mint that the ReferralBonusGiven event just
+ * reported, so that no later purchase in the same transaction can claim it:
+ * the bonus goes to the REFERRER, and if a later purchase in the very same
+ * transaction buys for that referrer, a plain receiver match would hand the
+ * free bonus to it.  Called from the referral tracker's handler, which runs
+ * right after the bonus mint (the sale emits the two back to back).
+ */
+export function markReferralBonusMint (txHash: Bytes, referrer: string,
+                                       clubId: BigInt, num: BigInt): void
+{
+  const queue = TxMints.load (txHash)
+  if (queue == null)
+    return
+
+  const club = clubId.toI32 ()
+  const n = num.toI32 ()
+  const mints = queue.mints.load ()
+  for (let i = 0; i < mints.length; ++i)
+    {
+      const mint = mints[i]
+      /* Any unclaimed, unmarked mint matching the bonus exactly IS the
+         bonus: the referrer's paid mints have been claimed by their own
+         purchase by the time the bonus is given, and a later purchase's
+         mints do not exist yet.  */
+      const prev = mint.get ("purchase")
+      const unclaimed = !prev || prev.kind == ValueKind.NULL
+      const matches = unclaimed && !mint.referralBonus
+          && mint.receiver == referrer
+          && mint.club.toI32 () == club
+          && mint.num == n
+      if (matches)
+        {
+          mint.referralBonus = true
+          mint.save ()
+          return
+        }
+    }
+}
+
+/**
+ * Handles the voucher token's ERC-20 transfers.  Only the burn matters:
+ * batchRedeem burns the invocation's whole cost before it mints anything,
+ * so the burn count delimits invocations within one transaction -- and the
+ * invocation, not the transaction, is the boundary the voucher validates
+ * costs at.
+ */
+export function handleVoucherTransfer (event: VoucherTransferEvent): void
+{
+  if (event.params.to.toHexString () != Address.zero ().toHexString ())
+    return
+
+  const queue = txMintsRow (event.transaction.hash)
+  queue.voucherBurns = queue.voucherBurns + 1
+  queue.save ()
 }
 
 /**
@@ -470,7 +550,7 @@ export function handleSeedUpdated (event: SeedUpdatedEvent): void
 function recordPacksBought (event: ethereum.Event, buyer: Address,
                             receiver: string, primaryClubId: BigInt,
                             numPacks: BigInt, cost: BigInt,
-                            tier: Bytes | null): void
+                            tier: Bytes | null, voucher: bool): void
 {
   const id = event.transaction.hash.concatI32 (event.logIndex.toI32 ())
   const ev = new PacksBought (id)
@@ -484,13 +564,90 @@ function recordPacksBought (event: ethereum.Event, buyer: Address,
   ev.numPacks = numPacks.toI32 ()
   ev.usdSpent = cost
   ev.save ()
+
+  /* Claim the mints this purchase paid for.  Both sale paths mint an
+     operation's shares immediately before emitting its PacksBought, so
+     they are all recorded by now; mints claimed by an earlier purchase of
+     the same transaction stay claimed, which is what splits a voucher
+     batch holding two purchases for one receiver correctly.  The referral
+     bonus is minted to the referrer only after the buyer's own PacksBought
+     and gets marked before any later purchase's events, so it can never be
+     claimed even by a later purchase FOR the referrer.  */
+  const queue = TxMints.load (event.transaction.hash)
+  if (queue == null)
+    return
+  const txMints = queue.mints.load ()
+  const claimed: InfluenceMint[] = []
+  for (let i = 0; i < txMints.length; ++i)
+    {
+      const mint = txMints[i]
+      /* Same accessor dance as in currentTier, for the same compiler
+         reason.  */
+      const prev = mint.get ("purchase")
+      const unclaimed = !prev || prev.kind == ValueKind.NULL
+      if (unclaimed && !mint.referralBonus && mint.receiver == receiver)
+        {
+          mint.purchase = id
+          claimed.push (mint)
+        }
+    }
+
+  /* The voucher's batchRedeem validates every operation's cost before it
+     mints anything, so when operations of one invocation contain the same
+     club, all of them are charged from the supply the invocation started
+     at -- not from the counter their mints then actually moved.  Re-price
+     the claimed mints from that invocation-start supply so their sum stays
+     exactly what this purchase paid.  The invocation, not the transaction,
+     is the boundary: batchRedeem is public, and a second call in the same
+     transaction validates against the supply the first one moved.  Without
+     an overlap (every invocation on chain so far) the start supply IS the
+     mint's own mintedBefore and this recomputes the identical number.  The
+     direct sale path re-validates per purchase instead, so its
+     running-counter price is already exact and is left alone.  */
+  if (voucher)
+    for (let i = 0; i < claimed.length; ++i)
+      {
+        const mint = claimed[i]
+        const tierValue = mint.get ("tier")
+        if (!tierValue || tierValue.kind == ValueKind.NULL)
+          continue
+        /* The club IDs are Bytes.fromI32 of the club id, so comparing the
+           i32 avoids the Bytes "==" overload, which crashes the compiler
+           (same class of problem as the ValueKind dance above).  */
+        let base = mint.mintedBefore
+        const mintClub = mint.club.toI32 ()
+        for (let j = 0; j < txMints.length; ++j)
+          if (txMints[j].club.toI32 () == mintClub
+                && txMints[j].voucherInvocation == mint.voucherInvocation
+                && txMints[j].mintedBefore < base)
+            base = txMints[j].mintedBefore
+        if (base == mint.mintedBefore)
+          continue
+        const mintTier = SaleTier.load (tierValue.toBytes ())!
+        mint.usdCost = costForMint (mintTier.pricingSteps.load (),
+                                    base, mint.num)
+      }
+
+  let claimedSum = BigInt.fromI32 (0)
+  for (let i = 0; i < claimed.length; ++i)
+    {
+      claimed[i].save ()
+      claimedSum = claimedSum.plus (claimed[i].usdCost)
+    }
+
+  /* The exactness invariant this whole entity exists for.  It should never
+     fire; if it ever does, the affected purchase is easy to find.  */
+  if (!claimedSum.minus (cost).isZero ())
+    log.warning ("PacksBought {}: claimed mints sum to {}, usdSpent is {}",
+                 [id.toHexString (), claimedSum.toString (),
+                  cost.toString ()])
 }
 
 export function handlePacksBought (event: PacksBoughtEvent): void
 {
   recordPacksBought (event, event.params.buyer, event.params.receiver,
                      event.params.primaryClubId, event.params.numPacks,
-                     event.params.cost, event.address)
+                     event.params.cost, event.address, false)
 }
 
 export function handleVoucherPacksBought (event: VoucherPacksBoughtEvent): void
@@ -502,7 +659,7 @@ export function handleVoucherPacksBought (event: VoucherPacksBoughtEvent): void
      way.  The voucher is not a SaleTier, hence the null.  */
   recordPacksBought (event, event.params.buyer, event.params.receiver,
                      event.params.primaryClubId, event.params.numPacks,
-                     event.params.cost, null)
+                     event.params.cost, null, true)
 }
 
 /* ************************************************************************** */

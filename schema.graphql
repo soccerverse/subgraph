@@ -139,13 +139,16 @@ type PacksBought @entity (immutable: true) {
   # The block this was bought in, so it can be joined to the game ledger,
   # which is keyed by height and not by time.
   height: BigInt!
-  # The transaction, which is what ties this purchase to the InfluenceMints
-  # it paid for.  The mints are separate events and do not all precede this
-  # one, so the join has to be done on read rather than while indexing.
-  # Join on the receiver too: a referral bonus mints free shares to the
-  # REFERRER inside the buyer's own transaction, and charging those to the
-  # buyer would overstate what the pack cost.
+  # The transaction this purchase happened in.  The InfluenceMints it paid
+  # for point back at it (see "mints"); this is kept for cross-referencing
+  # with the chain itself.
   txHash: Bytes!
+  # The influence mints this purchase paid for.  The link is written while
+  # indexing: both sale paths mint an operation's shares immediately before
+  # they emit its PacksBought, so the purchase claims the transaction's
+  # still-unclaimed mints to its receiver.  (txHash, receiver) alone would
+  # not do: one voucher batch can hold several purchases for one receiver.
+  mints: [InfluenceMint!]! @derivedFrom (field: "purchase")
   # The buying address.
   buyer: Bytes!
   # The account name receiving the influence.
@@ -174,8 +177,9 @@ type PacksBought @entity (immutable: true) {
 # into the sale) pushed every club 20,000 further up its ladder for all the
 # purchases that came after it.  Keeping the unpaid ones (premine, admin
 # allocations, referral bonuses) lets them carry a defensible value at
-# receipt without pretending anyone spent it.
-type InfluenceMint @entity (immutable: true) {
+# receipt without pretending anyone spent it; the paid ones point at the
+# purchase that paid for them.
+type InfluenceMint @entity (immutable: false) {
   # The ID is the transaction hash with the log index appended.
   id: Bytes!
   timestamp: BigInt!
@@ -186,9 +190,10 @@ type InfluenceMint @entity (immutable: true) {
   receiver: String!
   num: Int!
   # The club's cumulative mint count before this mint, which is what fixed
-  # where on the ladder it sat: the input the pricing used.  The stored
-  # usdCost is the authoritative number, priced by the ladder in force
-  # when the mint was indexed.
+  # where on the ladder it sat: the input the pricing used, and what the
+  # voucher re-pricing reads to find an invocation's starting supply.  The
+  # stored usdCost is the authoritative number, priced by the ladder in
+  # force when the mint was indexed.
   mintedBefore: Int!
   # The tier whose ladder priced it, and the resulting cost in USD base
   # units (6dp).  Both are as of this block: a club can leave its tier
@@ -200,6 +205,45 @@ type InfluenceMint @entity (immutable: true) {
   # tier at all, and the cost is then zero.
   tier: SaleTier
   usdCost: BigInt!
+  # The purchase this mint was paid by, or null for the free ones.  Written
+  # when the PacksBought event arrives: both sale paths mint an operation's
+  # shares immediately before emitting its PacksBought, so the purchase
+  # claims the transaction's still-unclaimed, non-bonus mints to its
+  # receiver.  For voucher purchases the claimed mints are then re-priced
+  # from their club's supply at the start of the batchRedeem invocation,
+  # which validates every operation's cost before it mints anything:
+  # operations of one invocation overlapping on a club are all charged
+  # from the supply the invocation started at.  No such overlap exists on
+  # chain so far, so the re-pricing has never changed a stored value; it
+  # is what keeps sum(mints of a purchase) == usdSpent if one appears.
+  purchase: PacksBought
+  # The transaction this belongs to, as a TxMints reference so the
+  # transaction's mints are a derived lookup rather than a maintained list.
+  tx: TxMints!
+  # TxMints.voucherBurns as it stood when this mint was recorded.  Mints of
+  # one batchRedeem invocation share it (the invocation burns its whole
+  # cost before minting anything), and the voucher re-pricing must not
+  # reach across invocations: each one is validated against the supply as
+  # it stood when that invocation started, not when the transaction did.
+  voucherInvocation: Int!
+  # True for the free referral bonus the sale mints to the referrer right
+  # after the buyer's own PacksBought.  Set from ReferralBonusGiven; this
+  # is what keeps the bonus from being claimed by a later purchase for the
+  # referrer in the same transaction.
+  referralBonus: Boolean!
+}
+
+# One row per transaction that minted influence, so that a PacksBought
+# event can look up the transaction's mints and claim the ones its
+# purchase paid for, and so that voucher invocations can be told apart.
+# Bookkeeping for indexing; not meant for querying.
+type TxMints @entity (immutable: false) {
+  # The ID is the transaction hash.
+  id: Bytes!
+  # The influence mints of the transaction.
+  mints: [InfluenceMint!]! @derivedFrom (field: "tx")
+  # Number of voucher burns seen in the transaction so far.
+  voucherBurns: Int!
 }
 
 ################################################################################
