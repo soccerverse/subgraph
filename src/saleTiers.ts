@@ -15,6 +15,11 @@ import {
 } from "../generated/templates/PackSaleForShop/SwappingPackSale"
 
 import {
+  PacksBought as VoucherPacksBoughtEvent,
+} from "../generated/PackVoucher/SwappingPackSale"
+
+import {
+  InfluenceMint,
   Pack,
   PackShareContent,
   PacksBought,
@@ -117,6 +122,20 @@ function refreshClubsPack (clubId: i32): void
 }
 
 /**
+ * Returns the tier a club is currently being sold in, or null if it is not
+ * for sale at the moment.
+ */
+function currentTier (club: SaleClub): SaleTier | null
+{
+  /* Same as in refreshClubsPack, we need to access the tier in this way
+     to avoid an internal compiler error.  */
+  const tierValue = club.get ("tier")
+  if (!tierValue || tierValue.kind == ValueKind.NULL)
+    return null
+  return SaleTier.load (tierValue.toBytes ())
+}
+
+/**
  * Refreshes a club's tranche / remainingInTranche data.
  */
 function refreshClubTranche (clubId: i32): void
@@ -125,17 +144,7 @@ function refreshClubTranche (clubId: i32): void
   if (club == null)
     return
 
-  /* Same as in refreshClubsPack, we need to access the tier in this way
-     to avoid an internal compiler error.  */
-  const tierValue = club.get ("tier")
-  if (!tierValue || tierValue.kind == ValueKind.NULL)
-    {
-      club.trancheIndex = -1
-      club.remainingInTranche = 0
-      club.save ()
-      return
-    }
-  const tier = SaleTier.load (tierValue.toBytes ())
+  const tier = currentTier (club)
   if (tier == null)
     {
       club.trancheIndex = -1
@@ -161,6 +170,122 @@ function refreshClubTranche (clubId: i32): void
   club.trancheIndex = -1
   club.remainingInTranche = 0
   club.save ()
+}
+
+/**
+ * Computes what it costs, in USD base units, to mint "num" shares of a club
+ * that already has "mintedBefore" shares minted, walking the given pricing
+ * steps the way the sale contract itself does.
+ *
+ * This is the entire reason a pack's single price can be split across the
+ * clubs it contains: the sale does not charge a bundle price, it charges each
+ * club's shares at that club's own current tranche.  A mint can span several
+ * tranches, so this is never one price times a count.
+ *
+ * Exported for the tests, which check it against real purchases.
+ */
+export function costForMint (steps: PricingStep[], mintedBefore: i32,
+                             num: i32): BigInt
+{
+  if (num <= 0)
+    return BigInt.fromI32 (0)
+
+  const to = mintedBefore + num
+  let cost = BigInt.fromI32 (0)
+  let lastTotal = -1
+  let lastPrice = BigInt.fromI32 (0)
+
+  /* We do not rely on the order the pricing steps come back in, only on the
+     ranges they declare.  */
+  for (let i = 0; i < steps.length; ++i)
+    {
+      const stepFrom = steps[i].fromTotal > mintedBefore
+          ? steps[i].fromTotal : mintedBefore
+      const stepTo = steps[i].toTotal + 1 < to ? steps[i].toTotal + 1 : to
+      if (stepTo > stepFrom)
+        cost = cost.plus (BigInt.fromI32 (stepTo - stepFrom).times (steps[i].price))
+      if (steps[i].toTotal > lastTotal)
+        {
+          lastTotal = steps[i].toTotal
+          lastPrice = steps[i].price
+        }
+    }
+
+  /* Shares minted beyond the end of the ladder keep the last tranche's price.
+     A handful of clubs have run past their final tranche, and pricing the
+     overflow at zero would quietly report those shares as free, which is the
+     one thing this must never say by accident.  */
+  if (lastTotal >= 0 && to > lastTotal + 1)
+    {
+      const from = mintedBefore > lastTotal + 1 ? mintedBefore : lastTotal + 1
+      cost = cost.plus (BigInt.fromI32 (to - from).times (lastPrice))
+    }
+
+  return cost
+}
+
+/**
+ * Returns the tier whose ladder prices a club's mints right now: the tier
+ * the club is actively sold in, or failing that the one that paused it.  A
+ * paused club still has its ladder -- the sale pauses a club by removing it
+ * from the tier when it sells out, and the premine and later give-aways
+ * really did mint shares of sold-out clubs afterwards.  Pricing those at
+ * zero would report the most sold-out clubs' shares as free.  This is
+ * deliberately NOT used for the tranche/shop data, where "paused" must
+ * keep meaning "not for sale".
+ */
+function pricingTier (club: SaleClub): SaleTier | null
+{
+  const tier = currentTier (club)
+  if (tier != null)
+    return tier
+
+  /* Same accessor dance as in currentTier, for the same compiler reason.  */
+  const pausedValue = club.get ("pausedInTier")
+  if (!pausedValue || pausedValue.kind == ValueKind.NULL)
+    return null
+  return SaleTier.load (pausedValue.toBytes ())
+}
+
+/**
+ * Records one influence mint, priced at the tranches it consumed.  We do this
+ * for every mint and not just the paid ones, because the unpaid mints (the
+ * premine, admin allocations, referral bonuses) move the sale's tranche
+ * counter just as much, and because valuing what someone received for free
+ * needs the same number.
+ */
+function recordInfluenceMint (event: SharesMintedEvent, club: SaleClub): void
+{
+  const num = event.params.num.toI32 ()
+
+  const mint = new InfluenceMint (
+      event.transaction.hash.concatI32 (event.logIndex.toI32 ()))
+  mint.timestamp = event.block.timestamp
+  mint.height = event.block.number
+  mint.txHash = event.transaction.hash
+  mint.club = club.id
+  mint.receiver = event.params.receiver
+  mint.num = num
+  /* totalMinted is the contract's own counter after this mint.  */
+  mint.mintedBefore = event.params.totalMinted.toI32 () - num
+
+  /* The tier is read as it stands right now, which is the point of doing this
+     here: the club may be removed from the tier later (the sale removes a club
+     in the very transaction whose purchase sold it out), and by then there
+     would be no ladder left to price this mint with.  */
+  const tier = pricingTier (club)
+  if (tier == null)
+    {
+      mint.usdCost = BigInt.fromI32 (0)
+    }
+  else
+    {
+      mint.tier = tier.id
+      mint.usdCost = costForMint (tier.pricingSteps.load (),
+                                  mint.mintedBefore, num)
+    }
+
+  mint.save ()
 }
 
 /**
@@ -200,6 +325,10 @@ export function handleSharesMinted (event: SharesMintedEvent): void
     }
   club.minted = event.params.totalMinted.toI32 ()
   club.save ()
+
+  /* Record what this mint cost, while the tranche the sale charged for it is
+     still the current one.  */
+  recordInfluenceMint (event, club)
 
   /* Update the tranche information.  */
   refreshClubTranche (event.params.clubId.toI32 ())
@@ -333,18 +462,47 @@ export function handleSeedUpdated (event: SeedUpdatedEvent): void
     refreshTierPacks (event.address)
 }
 
-export function handlePacksBought (event: PacksBoughtEvent): void
+/**
+ * Records a pack purchase.  The two payment routes emit the very same event
+ * with the same USD cost, so they share this; they differ only in whether the
+ * emitting contract is one of the sale tiers.
+ */
+function recordPacksBought (event: ethereum.Event, buyer: Address,
+                            receiver: string, primaryClubId: BigInt,
+                            numPacks: BigInt, cost: BigInt,
+                            tier: Bytes | null): void
 {
   const id = event.transaction.hash.concatI32 (event.logIndex.toI32 ())
   const ev = new PacksBought (id)
   ev.timestamp = event.block.timestamp
-  ev.buyer = event.params.buyer
-  ev.receiver = event.params.receiver
-  ev.primaryClub = clubEntityId (event.params.primaryClubId.toI32 ())
-  ev.tier = event.address
-  ev.numPacks = event.params.numPacks.toI32 ()
-  ev.usdSpent = event.params.cost
+  ev.height = event.block.number
+  ev.txHash = event.transaction.hash
+  ev.buyer = buyer
+  ev.receiver = receiver
+  ev.primaryClub = clubEntityId (primaryClubId.toI32 ())
+  ev.tier = tier
+  ev.numPacks = numPacks.toI32 ()
+  ev.usdSpent = cost
   ev.save ()
+}
+
+export function handlePacksBought (event: PacksBoughtEvent): void
+{
+  recordPacksBought (event, event.params.buyer, event.params.receiver,
+                     event.params.primaryClubId, event.params.numPacks,
+                     event.params.cost, event.address)
+}
+
+export function handleVoucherPacksBought (event: VoucherPacksBoughtEvent): void
+{
+  /* Packs paid for with SVV are sold by a separate voucher contract, which
+     emits the identical event with the identical USD cost (it swaps SVV for
+     the pack, it does not price it differently).  Those purchases are
+     otherwise invisible here, and some accounts have never bought any other
+     way.  The voucher is not a SaleTier, hence the null.  */
+  recordPacksBought (event, event.params.buyer, event.params.receiver,
+                     event.params.primaryClubId, event.params.numPacks,
+                     event.params.cost, null)
 }
 
 /* ************************************************************************** */

@@ -136,16 +136,70 @@ type PacksBought @entity (immutable: true) {
   # The ID is constructed from txid and log index and just a unique ID.
   id: Bytes!
   timestamp: BigInt!
+  # The block this was bought in, so it can be joined to the game ledger,
+  # which is keyed by height and not by time.
+  height: BigInt!
+  # The transaction, which is what ties this purchase to the InfluenceMints
+  # it paid for.  The mints are separate events and do not all precede this
+  # one, so the join has to be done on read rather than while indexing.
+  # Join on the receiver too: a referral bonus mints free shares to the
+  # REFERRER inside the buyer's own transaction, and charging those to the
+  # buyer would overstate what the pack cost.
+  txHash: Bytes!
   # The buying address.
   buyer: Bytes!
   # The account name receiving the influence.
   receiver: String!
   primaryClub: SaleClub!
   # The tier of this pack, at the time of buying (in case the club is
-  # changed later to be in another tier).
-  tier: SaleTier!
+  # changed later to be in another tier).  Null when the pack was paid for
+  # with SVV through the voucher contract, which is not a tier.
+  tier: SaleTier
   numPacks: Int!
   usdSpent: BigInt!
+}
+
+# Every influence mint from the sale, priced at the tranches it consumed.
+#
+# The sale does not charge a bundle price: each club's shares cost that
+# club's own tranche price, which is why a pack's single price decomposes
+# across its clubs exactly.  Doing that arithmetic here rather than in a
+# consumer is the whole point of the entity.  The three inputs it needs (the
+# club's tier, that tier's ladder, and the club's cumulative mint count) are
+# simply the current values while the handler runs, so there is no history
+# to reconstruct and no way to ask the question as of the wrong block.
+#
+# Written for EVERY mint, paid or not, because the sale's own tranche counter
+# is moved by all of them: the 20,000-per-club premine (block ~82.9M, months
+# into the sale) pushed every club 20,000 further up its ladder for all the
+# purchases that came after it.  Keeping the unpaid ones (premine, admin
+# allocations, referral bonuses) lets them carry a defensible value at
+# receipt without pretending anyone spent it.
+type InfluenceMint @entity (immutable: true) {
+  # The ID is the transaction hash with the log index appended.
+  id: Bytes!
+  timestamp: BigInt!
+  height: BigInt!
+  txHash: Bytes!
+  club: SaleClub!
+  # The account name receiving the influence.
+  receiver: String!
+  num: Int!
+  # The club's cumulative mint count before this mint, which is what fixed
+  # where on the ladder it sat: the input the pricing used.  The stored
+  # usdCost is the authoritative number, priced by the ladder in force
+  # when the mint was indexed.
+  mintedBefore: Int!
+  # The tier whose ladder priced it, and the resulting cost in USD base
+  # units (6dp).  Both are as of this block: a club can leave its tier
+  # later, and then its old mints would no longer be priceable at all.  A
+  # club that was paused out of its tier (sold out) keeps that tier's
+  # ladder for pricing: the premine and later give-aways really minted
+  # shares of sold-out clubs, and a null price there would report the most
+  # sold-out clubs' shares as free.  Null tier means the club was in no
+  # tier at all, and the cost is then zero.
+  tier: SaleTier
+  usdCost: BigInt!
 }
 
 ################################################################################
