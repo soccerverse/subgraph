@@ -42,6 +42,7 @@ dataSources:
       apiVersion: 0.0.9
       language: wasm/assemblyscript
       entities:
+        - InfluenceMint
         - SaleClub
       abis:
         - name: ClubMinter
@@ -55,6 +56,40 @@ dataSources:
       eventHandlers:
         - event: SharesMinted(indexed uint256,uint256,string,uint256,uint256)
           handler: handleSharesMinted
+      file: src/saleTiers.ts
+
+  # Packs can also be paid for with SVV, through a voucher contract that swaps
+  # it for the pack.  It emits the same PacksBought event with the same USD
+  # cost as the tiers do, but it is not itself a sale tier (it has no clubs and
+  # no pricing of its own), so it gets its own data source with just that one
+  # handler rather than joining SALE_CONTRACTS.
+  - kind: ethereum/contract
+    name: PackVoucher
+    network: matic
+    source:
+      address: "0x9De075D87B812eC647d5541CB50d65Bc06Ec6509"
+      abi: PackVoucher
+      startBlock: 67923247
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      entities:
+        - PacksBought
+        - TxMints
+      abis:
+        - name: PackVoucher
+          file: abis/PackVoucher.json
+        - name: SwappingPackSale
+          file: abis/SwappingPackSale.json
+      eventHandlers:
+        - event: PacksBought(indexed address,string,indexed uint256,uint256,uint256)
+          handler: handleVoucherPacksBought
+        # The voucher is an ERC-20; the only transfer that matters here is
+        # the burn, which batchRedeem does once per invocation before it
+        # mints anything, so it delimits invocations within a transaction.
+        - event: Transfer(indexed address,indexed address,uint256)
+          handler: handleVoucherTransfer
       file: src/saleTiers.ts
 
   - kind: ethereum/contract

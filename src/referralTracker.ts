@@ -22,6 +22,10 @@ import {
 } from "./config"
 
 import {
+  markReferralBonusMint,
+} from "./saleTiers"
+
+import {
   Address,
   BigInt,
   ByteArray,
@@ -136,6 +140,12 @@ export function handleReferralBonus (event: ReferralBonusGivenEvent): void
   bonus.save ()
 
   updateReferrerTotals (referrer, timestamp, 0, bonusShares, usdSpent)
+
+  /* The bonus mint itself precedes this event, so it exists; mark it as
+     the free bonus before any later purchase in the transaction could
+     mistake it for one of its own paid mints.  */
+  markReferralBonusMint (event.transaction.hash, event.params.referrer,
+                         event.params.clubId, event.params.numShares)
 }
 
 /* ************************************************************************** */
