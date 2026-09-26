@@ -161,6 +161,8 @@ templates:
       abis:
         - name: SwappingPackSale
           file: abis/SwappingPackSale.json
+        - name: Multicall3
+          file: abis/Multicall3.json
       eventHandlers:
         - event: ClubAdded(indexed uint256)
           handler: handleClubAdded
