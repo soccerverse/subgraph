@@ -1,4 +1,9 @@
 specVersion: 0.0.8
+features:
+  - grafting
+graft:
+  base: QmWybA1iubUyQCR4F2irZrTNZaoremX8urRGe6f9gRPX6N
+  block: 94839250
 schema:
   file: schema.graphql
 
@@ -161,6 +166,8 @@ templates:
       abis:
         - name: SwappingPackSale
           file: abis/SwappingPackSale.json
+        - name: Multicall3
+          file: abis/Multicall3.json
       eventHandlers:
         - event: ClubAdded(indexed uint256)
           handler: handleClubAdded

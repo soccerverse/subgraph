@@ -12,6 +12,7 @@ import {
   PricingUpdated as PricingUpdatedEvent,
   SeedUpdated as SeedUpdatedEvent,
   SwappingPackSale,
+  SwappingPackSale__previewResultResStruct as PackPreview,
 } from "../generated/templates/PackSaleForShop/SwappingPackSale"
 
 import {
@@ -38,6 +39,12 @@ import {
   PACK_START_HEIGHT,
   SALE_CONTRACTS,
 } from "./config"
+
+import {
+  PACK_BATCH_SIZE,
+  readMaxPacks,
+  readPreviews,
+} from "./packCalls"
 
 import {
   Address,
@@ -105,7 +112,15 @@ function refreshClubsPack (clubId: i32): void
     return
 
   const prev = contract.preview (BigInt.fromI32 (clubId), BigInt.fromI32 (1))
+  saveClubsPack (clubId, maxPacks, prev)
+}
 
+/**
+ * Saves a pack after its old contents have been removed.
+ */
+function saveClubsPack (clubId: i32, maxPacks: i32, prev: PackPreview): void
+{
+  const entityId = clubEntityId (clubId)
   const pack = new Pack (entityId)
   pack.primaryClub = entityId
   pack.maxPacks = maxPacks
@@ -380,10 +395,27 @@ function refreshTierPacks (addr: Address): void
      that are done per block, so those would just drown in there.  They are not
      really "something going wrong", though.  */
   log.warning ("Starting full refresh of packs in tier: {}", [tier.name])
-  for (let i = 0; i < clubs.length; ++i)
+  for (let start = 0; start < clubs.length; start += PACK_BATCH_SIZE)
     {
-      refreshClubsPack (clubs[i].clubId)
-      refreshClubTranche (clubs[i].clubId)
+      const ids: i32[] = []
+      for (let i = start; i < clubs.length && i < start + PACK_BATCH_SIZE; ++i)
+        ids.push (clubs[i].clubId)
+
+      const maxPacks = readMaxPacks (addr, ids)
+      const available: i32[] = []
+      for (let i = 0; i < ids.length; ++i)
+        if (maxPacks[i] > 0)
+          available.push (ids[i])
+      const previews = readPreviews (addr, available)
+
+      let nextPreview = 0
+      for (let i = 0; i < ids.length; ++i)
+        {
+          removeClubsPack (ids[i])
+          if (maxPacks[i] > 0)
+            saveClubsPack (ids[i], maxPacks[i], previews[nextPreview++])
+          refreshClubTranche (ids[i])
+        }
     }
   log.warning ("Finished pack refresh for tier: {}", [tier.name])
 }
